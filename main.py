@@ -14,6 +14,9 @@ from src.news.twitter_client import TwitterClient
 from src.news.news_classifier import NewsClassifier
 from src.news.news_aggregator import NewsAggregator
 from src.news.news_sentiment_strategy import NewsSentimentStrategy
+from src.darknet.tor_client import TorClient
+from src.darknet.marketplace_scraper import MarketplaceScraper
+from src.darknet.darknet_adoption_strategy import DarknetAdoptionStrategy
 from src.risk.risk_manager import RiskManager
 from src.execution.order_manager import OrderManager
 from src.database.models import init_database
@@ -65,8 +68,41 @@ class MoneroTradingBot:
                 "News monitoring disabled. Set TWITTER_BEARER_TOKEN and "
                 "OPENAI_API_KEY/ANTHROPIC_API_KEY to enable."
             )
+        
+        # Darknet monitoring components (optional, based on config)
+        self.darknet_strategy = None
+        self.tor_client = None
+        if config.darknet_monitoring_available:
+            logger.info("Initializing darknet monitoring system...")
+            try:
+                self.tor_client = TorClient(
+                    tor_proxy_host=config.darknet_tor_proxy_host,
+                    tor_proxy_port=config.darknet_tor_proxy_port
+                )
+                
+                # Test Tor connection
+                if self.tor_client.connect():
+                    marketplace_scraper = MarketplaceScraper(self.tor_client)
+                    self.darknet_strategy = DarknetAdoptionStrategy(
+                        marketplace_scraper=marketplace_scraper,
+                        bullish_threshold=config.darknet_bullish_threshold,
+                        bearish_threshold=config.darknet_bearish_threshold,
+                        min_confidence=config.darknet_min_confidence,
+                        update_interval_hours=config.darknet_update_interval_hours
+                    )
+                    logger.info("Darknet monitoring initialized successfully")
+                else:
+                    logger.error("Failed to connect to Tor network. Darknet monitoring disabled.")
+                    self.tor_client = None
+            except Exception as e:
+                logger.error(f"Error initializing darknet monitoring: {e}")
+                logger.warning("Darknet monitoring disabled")
+                self.tor_client = None
+                self.darknet_strategy = None
+        else:
+            logger.info("Darknet monitoring disabled (set DARKNET_MONITORING_ENABLED=true to enable)")
 
-        # Signal aggregator with BTC correlation strategy
+        # Signal aggregator with all strategies
         self.signal_aggregator = SignalAggregator()
         self.signal_aggregator.strategies.append(self.btc_correlation_strategy)
         
@@ -74,7 +110,11 @@ class MoneroTradingBot:
         if self.news_strategy:
             self.signal_aggregator.strategies.append(self.news_strategy)
         
-        # Set strategy weights: BTC Correlation 40%, News 10%, ML 25%, Traditional 25%
+        # Add darknet strategy if available
+        if self.darknet_strategy:
+            self.signal_aggregator.strategies.append(self.darknet_strategy)
+        
+        # Set strategy weights dynamically based on enabled strategies
         strategy_weights = {
             'BTCCorrelation': 0.40,
             'TrendFollowing': 0.125,
@@ -82,10 +122,14 @@ class MoneroTradingBot:
             'XGBoostML': 0.25  # ML strategies get 25% if available
         }
         
-        # Add news strategy weight if enabled
+        # Add optional strategy weights if enabled
         if self.news_strategy:
             strategy_weights['NewsSentiment'] = config.news_strategy_weight
             logger.info(f"News sentiment strategy enabled with {config.news_strategy_weight:.1%} weight")
+        
+        if self.darknet_strategy:
+            strategy_weights['DarknetAdoption'] = config.darknet_strategy_weight
+            logger.info(f"Darknet adoption strategy enabled with {config.darknet_strategy_weight:.1%} weight")
         
         self.signal_aggregator.update_weights(strategy_weights)
 
@@ -125,6 +169,10 @@ class MoneroTradingBot:
         # Start background news monitoring if enabled
         if self.news_strategy:
             asyncio.create_task(self._news_monitoring_loop())
+        
+        # Start background darknet monitoring if enabled
+        if self.darknet_strategy:
+            asyncio.create_task(self._darknet_monitoring_loop())
 
         while self.running:
             try:
@@ -281,6 +329,54 @@ class MoneroTradingBot:
                 logger.error(f"Error in news monitoring loop: {e}")
                 await asyncio.sleep(300)  # Wait 5 minutes on error
     
+    async def _darknet_monitoring_loop(self):
+        """Background task for darknet adoption monitoring."""
+        logger.info("Starting darknet monitoring background task...")
+        
+        while self.running:
+            try:
+                # Update darknet adoption data
+                logger.info("Updating darknet marketplace adoption data...")
+                success = await self.darknet_strategy.update_adoption_data()
+                
+                if success:
+                    # Get adoption report
+                    report = self.darknet_strategy.get_adoption_report()
+                    
+                    if report['status'] == 'ok':
+                        logger.info(
+                            f"Darknet adoption updated: "
+                            f"XMR={report['current_adoption']['xmr_percentage']:.1f}%, "
+                            f"BTC={report['current_adoption']['btc_percentage']:.1f}%, "
+                            f"trend={report['current_adoption']['trend']}, "
+                            f"zone={report['signal_status']['current_zone']}"
+                        )
+                        
+                        # Send Telegram alert for significant adoption changes
+                        current_zone = report['signal_status']['current_zone']
+                        if current_zone in ['bullish', 'bearish']:
+                            xmr_pct = report['current_adoption']['xmr_percentage']
+                            trend = report['current_adoption']['trend']
+                            confidence = report['data_quality']['confidence']
+                            
+                            await self.telegram.send_message(
+                                f"🧅 Darknet Adoption Update\n"
+                                f"Zone: {current_zone.upper()}\n"
+                                f"XMR: {xmr_pct:.1f}%\n"
+                                f"Trend: {trend}\n"
+                                f"Confidence: {confidence:.2f}\n"
+                                f"Marketplaces: {report['data_quality']['marketplaces_count']}"
+                            )
+                else:
+                    logger.warning("Failed to update darknet adoption data")
+                
+                # Wait for next check (default 24 hours)
+                await asyncio.sleep(config.darknet_update_interval_hours * 3600)
+                
+            except Exception as e:
+                logger.error(f"Error in darknet monitoring loop: {e}")
+                await asyncio.sleep(3600)  # Wait 1 hour on error
+    
     async def shutdown(self):
         """Graceful shutdown"""
         logger.info("Shutting down trading bot...")
@@ -291,6 +387,11 @@ class MoneroTradingBot:
         if self.news_strategy:
             await self.news_strategy.news_aggregator.twitter_client.disconnect()
             await self.news_strategy.news_aggregator.news_classifier.disconnect()
+        
+        # Disconnect darknet monitoring
+        if self.tor_client:
+            self.tor_client.disconnect()
+            logger.info("Disconnected from Tor network")
         
         logger.info("Bot shutdown complete")
 
