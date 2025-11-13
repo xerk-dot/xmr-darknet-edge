@@ -22,7 +22,7 @@ class Trade(Base):
     entry_time = Column(DateTime)
     exit_time = Column(DateTime)
     strategy = Column(String)
-    metadata = Column(JSON)
+    trade_metadata = Column(JSON)
 
 
 class Signal(Base):
@@ -36,7 +36,7 @@ class Signal(Base):
     confidence = Column(Float)
     strategy_name = Column(String)
     acted_upon = Column(Boolean, default=False)
-    metadata = Column(JSON)
+    signal_metadata = Column(JSON)
 
 
 class MarketData(Base):
@@ -68,6 +68,76 @@ class Position(Base):
     entry_time = Column(DateTime)
     is_open = Column(Boolean, default=True)
     unrealized_pnl = Column(Float)
+
+
+class NewsEvent(Base):
+    """Store classified news events from Twitter and other sources."""
+    __tablename__ = 'news_events'
+
+    id = Column(Integer, primary_key=True)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    source = Column(String)  # 'twitter', 'reddit', etc.
+    source_id = Column(String)  # Tweet ID, post ID, etc.
+    text = Column(String)
+    author = Column(String)
+    url = Column(String)
+    
+    # LLM Classification scores (0-100)
+    economic_score = Column(Float)
+    crypto_score = Column(Float)
+    privacy_score = Column(Float)
+    instability_score = Column(Float)
+    
+    # Sentiment analysis
+    sentiment = Column(String)  # 'bullish', 'bearish', 'neutral'
+    confidence = Column(Float)  # 0-1
+    overall_relevance = Column(Float)  # 0-100
+    
+    # Metadata
+    summary = Column(String)
+    key_entities = Column(JSON)
+    engagement_score = Column(Float)  # Likes, retweets, etc.
+    is_significant = Column(Boolean)
+    
+    # Processing
+    processed_at = Column(DateTime, default=datetime.utcnow)
+    classifier_model = Column(String)
+
+
+class NewsSentiment(Base):
+    """Aggregated news sentiment over time windows."""
+    __tablename__ = 'news_sentiment'
+
+    id = Column(Integer, primary_key=True)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    window_hours = Column(Integer)  # Aggregation window
+    
+    # Aggregated sentiment
+    overall_sentiment = Column(Float)  # -100 to +100
+    sentiment_strength = Column(Float)  # 0-100
+    
+    # Counts
+    total_news_items = Column(Integer)
+    significant_news_count = Column(Integer)
+    bullish_count = Column(Integer)
+    bearish_count = Column(Integer)
+    neutral_count = Column(Integer)
+    
+    # Average category scores
+    avg_economic_score = Column(Float)
+    avg_crypto_score = Column(Float)
+    avg_privacy_score = Column(Float)
+    avg_instability_score = Column(Float)
+    
+    # Trading signal generated
+    signal_generated = Column(Boolean, default=False)
+    signal_type = Column(String)
+    signal_strength = Column(Float)
+    signal_confidence = Column(Float)
+    
+    # Metadata
+    top_topics = Column(JSON)
+    is_actionable = Column(Boolean)
 
 
 def init_database():

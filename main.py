@@ -3,11 +3,17 @@ import logging
 from datetime import datetime, timedelta
 from typing import Dict, Any
 import pandas as pd
+import numpy as np
 
 from src.data.data_aggregator import DataAggregator
 from src.features.feature_engineering import FeatureEngineer
 from src.signals.signal_aggregator import SignalAggregator
-from src.signals.ml_strategy import XGBoostTradingStrategy
+from src.signals.ml_manager import MLModelManager
+from src.signals.btc_correlation_strategy import BTCCorrelationStrategy
+from src.news.twitter_client import TwitterClient
+from src.news.news_classifier import NewsClassifier
+from src.news.news_aggregator import NewsAggregator
+from src.news.news_sentiment_strategy import NewsSentimentStrategy
 from src.risk.risk_manager import RiskManager
 from src.execution.order_manager import OrderManager
 from src.database.models import init_database
@@ -27,14 +33,61 @@ class MoneroTradingBot:
     def __init__(self, initial_capital: float = 10000):
         self.initial_capital = initial_capital
         self.symbol = 'XMR/USDT'
+        self.btc_symbol = 'BTC/USDT'
 
         self.data_aggregator = DataAggregator()
         self.feature_engineer = FeatureEngineer()
 
-        # Add ML strategy to signal aggregator
-        ml_strategy = XGBoostTradingStrategy()
+        # BTC-XMR correlation strategy (40% weight - primary alpha source)
+        self.btc_correlation_strategy = BTCCorrelationStrategy()
+
+        # ML Model Manager coordinates all XGBoost models
+        self.ml_manager = MLModelManager(enable_all_models=True)
+
+        # News monitoring components (optional, based on config)
+        self.news_strategy = None
+        if config.news_monitoring_available:
+            logger.info("Initializing news monitoring system...")
+            twitter_client = TwitterClient(config.twitter_bearer_token)
+            news_classifier = NewsClassifier(
+                provider=config.news_llm_provider,
+                api_key=config.llm_api_key,
+                model=config.news_llm_model
+            )
+            news_aggregator = NewsAggregator(
+                twitter_client=twitter_client,
+                news_classifier=news_classifier,
+                aggregation_window_hours=config.news_aggregation_window_hours
+            )
+            self.news_strategy = NewsSentimentStrategy(news_aggregator=news_aggregator)
+        else:
+            logger.warning(
+                "News monitoring disabled. Set TWITTER_BEARER_TOKEN and "
+                "OPENAI_API_KEY/ANTHROPIC_API_KEY to enable."
+            )
+
+        # Signal aggregator with BTC correlation strategy
         self.signal_aggregator = SignalAggregator()
-        self.signal_aggregator.strategies.append(ml_strategy)
+        self.signal_aggregator.strategies.append(self.btc_correlation_strategy)
+        
+        # Add news strategy if available
+        if self.news_strategy:
+            self.signal_aggregator.strategies.append(self.news_strategy)
+        
+        # Set strategy weights: BTC Correlation 40%, News 10%, ML 25%, Traditional 25%
+        strategy_weights = {
+            'BTCCorrelation': 0.40,
+            'TrendFollowing': 0.125,
+            'MeanReversion': 0.125,
+            'XGBoostML': 0.25  # ML strategies get 25% if available
+        }
+        
+        # Add news strategy weight if enabled
+        if self.news_strategy:
+            strategy_weights['NewsSentiment'] = config.news_strategy_weight
+            logger.info(f"News sentiment strategy enabled with {config.news_strategy_weight:.1%} weight")
+        
+        self.signal_aggregator.update_weights(strategy_weights)
 
         self.risk_manager = RiskManager(initial_capital)
 
@@ -68,6 +121,10 @@ class MoneroTradingBot:
     async def run_twice_daily_checks(self):
         """Main trading loop - runs twice daily as per CLAUDE.md"""
         self.running = True
+        
+        # Start background news monitoring if enabled
+        if self.news_strategy:
+            asyncio.create_task(self._news_monitoring_loop())
 
         while self.running:
             try:
@@ -77,19 +134,41 @@ class MoneroTradingBot:
                 end_time = datetime.now()
                 start_time = end_time - timedelta(days=30)
 
-                df = await self.data_aggregator.fetch_aggregated_ohlcv(
+                # Fetch both XMR and BTC data
+                xmr_task = self.data_aggregator.fetch_aggregated_ohlcv(
                     symbol=self.symbol,
                     timeframe='1h',
                     since=start_time,
                     limit=720  # 30 days of hourly data
                 )
+                
+                btc_task = self.data_aggregator.fetch_aggregated_ohlcv(
+                    symbol=self.btc_symbol,
+                    timeframe='1h',
+                    since=start_time,
+                    limit=720
+                )
+                
+                df, btc_df = await asyncio.gather(xmr_task, btc_task)
 
                 if df.empty:
-                    logger.warning("No market data received")
+                    logger.warning("No XMR market data received")
                     await asyncio.sleep(3600)  # Wait 1 hour before retry
                     continue
+                
+                if btc_df.empty:
+                    logger.warning("No BTC market data received")
+                else:
+                    # Engineer features for BTC data and pass to correlation strategy
+                    btc_df = self.feature_engineer.engineer_features(btc_df)
+                    self.btc_correlation_strategy.set_btc_data(btc_df)
+                    
+                    # Log correlation stats
+                    corr_report = self.btc_correlation_strategy.get_correlation_report(df)
+                    logger.info(f"BTC-XMR Correlation: {corr_report.get('correlation', 0):.3f}, "
+                               f"Optimal lag: {corr_report.get('optimal_lag_hours', 0)}h")
 
-                # Engineer features
+                # Engineer features for XMR data
                 df = self.feature_engineer.engineer_features(df)
 
                 # Generate signals
@@ -169,11 +248,50 @@ class MoneroTradingBot:
             )
             logger.info(f"Closed position {position_id}: {trade_result}")
 
+    async def _news_monitoring_loop(self):
+        """Background task for continuous news monitoring."""
+        logger.info("Starting news monitoring background task...")
+        
+        while self.running:
+            try:
+                # Update news sentiment
+                await self.news_strategy.update_sentiment()
+                
+                # Get sentiment report
+                report = self.news_strategy.get_sentiment_summary()
+                if report['status'] == 'ok':
+                    logger.info(
+                        f"News sentiment updated: {report['overall_sentiment']:.1f}, "
+                        f"actionable: {report['is_actionable']}"
+                    )
+                    
+                    # Send Telegram alert for significant news
+                    if report['is_actionable'] and report['significant_news_count'] >= 3:
+                        await self.telegram.send_message(
+                            f"📰 Significant news detected!\n"
+                            f"Sentiment: {report['overall_sentiment']:.1f}\n"
+                            f"Significant items: {report['significant_news_count']}\n"
+                            f"Top news: {report['top_news_summaries'][0]['summary'] if report['top_news_summaries'] else 'N/A'}"
+                        )
+                
+                # Wait for next check
+                await asyncio.sleep(config.news_check_interval_minutes * 60)
+                
+            except Exception as e:
+                logger.error(f"Error in news monitoring loop: {e}")
+                await asyncio.sleep(300)  # Wait 5 minutes on error
+    
     async def shutdown(self):
         """Graceful shutdown"""
         logger.info("Shutting down trading bot...")
         self.running = False
         await self.data_aggregator.disconnect_all()
+        
+        # Disconnect news monitoring
+        if self.news_strategy:
+            await self.news_strategy.news_aggregator.twitter_client.disconnect()
+            await self.news_strategy.news_aggregator.news_classifier.disconnect()
+        
         logger.info("Bot shutdown complete")
 
     def run_backtest(self, start_date: str, end_date: str) -> Dict[str, Any]:

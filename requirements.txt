@@ -42,6 +42,10 @@ pytest-mock==3.12.0
 # Telegram bot
 python-telegram-bot==20.7
 
+# News monitoring
+openai==1.12.0
+anthropic==0.18.1
+
 # Development
 black==23.12.1
 flake8==7.0.0

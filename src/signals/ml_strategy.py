@@ -79,21 +79,42 @@ class XGBoostTradingStrategy(BaseStrategy):
             logger.error(f"Failed to save model: {e}")
 
     def prepare_features(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
-        """Prepare features and target for training"""
+        """Prepare features and target for training - REGIME DETECTION approach"""
         # Engineer features
         df_features = self.feature_engineer.engineer_features(df)
 
-        # Create target variable (future returns)
-        df_features['future_return'] = df_features['close'].pct_change().shift(-1)
+        # Define market regimes based on actual market conditions
+        # 0 = ranging (low volatility, no trend)
+        # 1 = trending_up (clear uptrend)
+        # 2 = trending_down (clear downtrend)
+        # 3 = high_volatility (choppy, dangerous)
 
-        # Create classification target
-        # 0 = sell/short, 1 = hold, 2 = buy/long
-        conditions = [
-            df_features['future_return'] < -0.005,  # < -0.5% = sell
-            df_features['future_return'] > 0.005,   # > 0.5% = buy
-        ]
-        choices = [0, 2]  # sell, buy
-        df_features['target'] = np.select(conditions, choices, default=1)  # hold
+        # Calculate regime indicators
+        returns = df_features['close'].pct_change()
+        volatility = returns.rolling(20).std()
+        vol_percentile = volatility.rolling(100).rank(pct=True)
+
+        # Trend strength using ADX
+        trend_strength = df_features.get('adx', 0)
+
+        # Price position relative to moving averages
+        if 'ema_20' in df_features.columns and 'ema_50' in df_features.columns:
+            above_short = df_features['close'] > df_features['ema_20']
+            above_long = df_features['close'] > df_features['ema_50']
+            ema_aligned = df_features['ema_20'] > df_features['ema_50']
+        else:
+            above_short = above_long = ema_aligned = False
+
+        # Define regime conditions
+        ranging = (trend_strength < 25) & (vol_percentile < 0.7)
+        trending_up = (trend_strength > 25) & above_short & above_long & ema_aligned
+        trending_down = (trend_strength > 25) & ~above_short & ~above_long & ~ema_aligned
+        high_vol = vol_percentile > 0.8
+
+        # Create target based on regimes
+        conditions = [high_vol, trending_up, trending_down, ranging]
+        choices = [3, 1, 2, 0]  # high_vol, trend_up, trend_down, ranging
+        df_features['target'] = np.select(conditions, choices, default=0)
 
         # Select features for training
         feature_columns = [
@@ -183,8 +204,8 @@ class XGBoostTradingStrategy(BaseStrategy):
             logger.error(f"Model training failed: {e}")
             return {'success': False, 'reason': str(e)}
 
-    def predict(self, df: pd.DataFrame) -> Optional[Dict[str, Any]]:
-        """Make prediction using the trained model"""
+    def predict_regime(self, df: pd.DataFrame) -> Optional[Dict[str, Any]]:
+        """Predict market regime using the trained model"""
         if self.model is None:
             logger.warning("No trained model available")
             return None
@@ -208,20 +229,32 @@ class XGBoostTradingStrategy(BaseStrategy):
             # Get prediction
             prediction = self.model.predict(features_scaled)[0]
 
-            prediction_map = {0: 'sell', 1: 'hold', 2: 'buy'}
+            # Map to regime names
+            regime_map = {
+                0: 'ranging',
+                1: 'trending_up',
+                2: 'trending_down',
+                3: 'high_volatility'
+            }
+
+            regime = regime_map.get(prediction, 'ranging')
+            confidence = max(probabilities)
+
+            logger.info(f"Detected regime: {regime} (confidence: {confidence:.2f})")
 
             return {
-                'prediction': prediction_map[prediction],
+                'regime': regime,
+                'confidence': confidence,
                 'probabilities': {
-                    'sell': probabilities[0],
-                    'hold': probabilities[1],
-                    'buy': probabilities[2]
-                },
-                'confidence': max(probabilities)
+                    'ranging': probabilities[0] if len(probabilities) > 0 else 0,
+                    'trending_up': probabilities[1] if len(probabilities) > 1 else 0,
+                    'trending_down': probabilities[2] if len(probabilities) > 2 else 0,
+                    'high_volatility': probabilities[3] if len(probabilities) > 3 else 0
+                }
             }
 
         except Exception as e:
-            logger.error(f"Prediction failed: {e}")
+            logger.error(f"Regime prediction failed: {e}")
             return None
 
     def should_retrain(self) -> bool:
@@ -236,45 +269,67 @@ class XGBoostTradingStrategy(BaseStrategy):
         return time_since_training > timedelta(hours=self.retrain_frequency)
 
     def generate_signal(self, df: pd.DataFrame) -> Optional[Signal]:
-        """Generate trading signal using ML model"""
+        """Generate trading signal based on REGIME DETECTION"""
         if len(df) < 50:
             return None
 
         # Check if retrain is needed
         if self.should_retrain():
-            logger.info("Retraining model...")
+            logger.info("Retraining regime detection model...")
             train_result = self.train_model(df)
             if not train_result.get('success', False):
                 logger.warning("Model retraining failed")
 
-        # Get prediction
-        prediction_result = self.predict(df)
+        # Get regime prediction
+        prediction_result = self.predict_regime(df)
         if prediction_result is None:
             return None
 
-        prediction = prediction_result['prediction']
+        regime = prediction_result['regime']
         confidence = prediction_result['confidence']
-        probabilities = prediction_result['probabilities']
 
-        # Convert to signal
-        signal_map = {
-            'buy': SignalType.BUY,
-            'sell': SignalType.SELL,
-            'hold': SignalType.HOLD
-        }
+        # Apply strategy based on detected regime
+        signal_type = None
+        strength = 0.5
 
-        if prediction == 'hold' or confidence < 0.6:
+        latest = df.iloc[-1]
+
+        if regime == 'trending_up':
+            # In uptrend: look for pullback entries
+            if latest.get('rsi', 50) < 40:  # Oversold in uptrend
+                signal_type = SignalType.BUY
+                strength = 0.8
+            elif latest.get('rsi', 50) > 70:  # Overbought in uptrend
+                signal_type = SignalType.HOLD
+
+        elif regime == 'trending_down':
+            # In downtrend: look for rallies to short
+            if latest.get('rsi', 50) > 60:  # Overbought in downtrend
+                signal_type = SignalType.SELL
+                strength = 0.8
+            elif latest.get('rsi', 50) < 30:  # Oversold in downtrend
+                signal_type = SignalType.HOLD
+
+        elif regime == 'ranging':
+            # Mean reversion in ranging market
+            if latest.get('rsi', 50) < 30:
+                signal_type = SignalType.BUY
+                strength = 0.6
+            elif latest.get('rsi', 50) > 70:
+                signal_type = SignalType.SELL
+                strength = 0.6
+
+        elif regime == 'high_volatility':
+            # Stay out during high volatility
+            signal_type = SignalType.HOLD
+            strength = 0.1
+            logger.info("High volatility detected - staying out")
+
+        if signal_type is None or signal_type == SignalType.HOLD:
             return None
 
-        signal_type = signal_map[prediction]
-
-        # Calculate strength based on probability difference
-        if prediction == 'buy':
-            strength = probabilities['buy'] - max(probabilities['sell'], probabilities['hold'])
-        else:
-            strength = probabilities['sell'] - max(probabilities['buy'], probabilities['hold'])
-
-        strength = max(0.1, min(1.0, strength * 2))  # Scale to 0.1-1.0
+        # Adjust strength based on regime confidence
+        strength = strength * confidence
 
         return Signal(
             signal_type=signal_type,
@@ -283,9 +338,10 @@ class XGBoostTradingStrategy(BaseStrategy):
             strategy_name=self.name,
             timestamp=pd.Timestamp.now(),
             metadata={
-                'probabilities': probabilities,
-                'ml_confidence': confidence,
-                'model_prediction': prediction
+                'detected_regime': regime,
+                'regime_confidence': confidence,
+                'rsi': latest.get('rsi', 0),
+                'strategy': f"{regime}_strategy"
             }
         )
 

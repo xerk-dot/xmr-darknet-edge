@@ -37,6 +37,17 @@ class TradingConfig(BaseSettings):
     telegram_bot_token: Optional[str] = Field(default=None)
     telegram_chat_id: Optional[str] = Field(default=None)
 
+    # News monitoring configuration
+    twitter_bearer_token: Optional[str] = Field(default=None)
+    news_llm_provider: str = Field(default="openai")  # 'openai' or 'anthropic'
+    openai_api_key: Optional[str] = Field(default=None)
+    anthropic_api_key: Optional[str] = Field(default=None)
+    news_llm_model: Optional[str] = Field(default=None)  # Auto-selects if None
+    news_monitoring_enabled: bool = Field(default=True)
+    news_check_interval_minutes: int = Field(default=30)
+    news_aggregation_window_hours: int = Field(default=2)
+    news_strategy_weight: float = Field(default=0.10, ge=0.0, le=1.0)
+
     max_position_size: float = Field(default=0.02, ge=0.001, le=0.1)
     max_portfolio_exposure: float = Field(default=0.3, ge=0.1, le=1.0)
     min_risk_reward_ratio: float = Field(default=1.5, ge=1.0)
@@ -71,6 +82,22 @@ class TradingConfig(BaseSettings):
                 "secret": self.kraken_secret
             }
         return creds
+
+    @property
+    def llm_api_key(self) -> Optional[str]:
+        """Get the appropriate LLM API key based on provider."""
+        if self.news_llm_provider == "openai":
+            return self.openai_api_key
+        elif self.news_llm_provider == "anthropic":
+            return self.anthropic_api_key
+        return None
+
+    @property
+    def news_monitoring_available(self) -> bool:
+        """Check if news monitoring can be enabled."""
+        has_twitter = bool(self.twitter_bearer_token)
+        has_llm = bool(self.llm_api_key)
+        return has_twitter and has_llm and self.news_monitoring_enabled
 
 
 config = TradingConfig()

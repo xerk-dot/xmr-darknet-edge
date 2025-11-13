@@ -24,9 +24,15 @@ class TechnicalIndicators:
 
         df['adx'] = ta.adx(df['high'], df['low'], df['close'], length=14)['ADX_14']
 
-        ichimoku = ta.ichimoku(df['high'], df['low'], df['close'])
-        if ichimoku is not None and len(ichimoku.columns) > 0:
-            df = pd.concat([df, ichimoku], axis=1)
+        try:
+            ichimoku = ta.ichimoku(df['high'], df['low'], df['close'])
+            if ichimoku is not None:
+                if isinstance(ichimoku, tuple):
+                    ichimoku = ichimoku[0]
+                if hasattr(ichimoku, 'columns'):
+                    df = pd.concat([df, ichimoku], axis=1)
+        except Exception:
+            pass  # Skip if ichimoku fails
 
         return df
 
@@ -54,12 +60,19 @@ class TechnicalIndicators:
 
         df['atr'] = ta.atr(df['high'], df['low'], df['close'], length=14)
 
-        bb = ta.bbands(df['close'], length=20, std=2)
-        df['bb_upper'] = bb['BBU_20_2.0']
-        df['bb_middle'] = bb['BBM_20_2.0']
-        df['bb_lower'] = bb['BBL_20_2.0']
-        df['bb_width'] = df['bb_upper'] - df['bb_lower']
-        df['bb_pct'] = (df['close'] - df['bb_lower']) / (df['bb_upper'] - df['bb_lower'])
+        try:
+            bb = ta.bbands(df['close'], length=20, std=2)
+            if bb is not None and len(bb.columns) > 0:
+                # Get column names dynamically as they can vary
+                bb_cols = bb.columns.tolist()
+                if len(bb_cols) >= 3:
+                    df['bb_lower'] = bb.iloc[:, 0]
+                    df['bb_middle'] = bb.iloc[:, 1]
+                    df['bb_upper'] = bb.iloc[:, 2]
+                    df['bb_width'] = df['bb_upper'] - df['bb_lower']
+                    df['bb_pct'] = (df['close'] - df['bb_lower']) / (df['bb_upper'] - df['bb_lower'])
+        except Exception:
+            pass  # Skip if bbands fails
 
         kc = ta.kc(df['high'], df['low'], df['close'], length=20, scalar=1.5)
         if kc is not None:
