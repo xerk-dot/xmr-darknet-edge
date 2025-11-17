@@ -1,10 +1,10 @@
-# XMR Quant - Monero Algorithmic Trading System
+# XMR Algorithmic Trading
 
 An indie quant project to (hopefully!) find alpha on Monero (XMR).
 
 ## Why XMR?
 
-THESIS: An ensemble XGBoost classification system that ingests over 30 technical indicators simultaneously—price dynamics, momentum, moving averages, volatility, volume patterns, and cross-asset correlations with Bitcoin... and learns which combinations actually predict Monero price movements. The model outputs buy/sell/hold signals with confidence scores, turning what's normally a subjective synthesis of conflicting indicators into a quantifiable prediction. Machine learning excels at exactly the kind of multidimensional pattern recognition that makes manual indicator analysis mentally taxing.
+THESIS: Most traders struggle to synthesize dozens of conflicting technical indicators in real-time. An XGBoost ensemble solves that problem: ingesting 30+ indicators simultaneously (price dynamics, momentum, moving averages, volatility, volume patterns, and Bitcoin correlations) to learn which combinations actually predict Monero price movements. The models output buy/sell/hold signals with confidence scores, turning subjective indicator analysis into quantifiable predictions. Machine learning excels at exactly this kind of multidimensional pattern recognition that makes manual analysis mentally taxing.
 
 The core insight is simple: Monero correlates with Bitcoin but moves independently enough that direct application of BTC indicators misses crucial signals. The XGBoost model discovers which combinations matter across different market cycle phases (accumulation, markup, distribution, and markdown). The system retrains weekly because markets evolve, filters signals by confidence threshold, and provides feature importance rankings so you know what's actually driving decisions. The backtest results show this approach consistently identifies market inflection points better than watching indicators individually.
 
@@ -16,7 +16,7 @@ This is a multi-strategy ensemble trading bot designed for Monero (XMR) markets:
 
 2. **BTC-XMR Correlation** - Tests for correlation between Bitcoin and Monero price movements with dynamic lag detection. Hypothesis: XMR may lag BTC movements due to lower liquidity and fragmented exchange availability. Exploits correlation inefficiencies for entry signals.
 
-3. **Development Activity Analysis** - Monitors GitHub repositories (Monero, Zcash, other privacy coins) tracking PRs, commits, and contributor activity to assess feature readiness and crisis management patterns that may signal upcoming price catalysts. Uses sentiment analysis on development activity as a leading indicator.
+3. **Development Activity Analysis** - Monitors GitHub repositories (Monero, Zcash, other privacy coins) tracking PRs, commits, and contributor activity to assess feature readiness and crisis management patterns that may signal upcoming price catalysts. Uses sentiment analysis on development activity as a leading indicator. Yes, this is a very noisy signal, but becomes relevant in cases like Qubit's alleged 51% attack.
 
 ## Repository Structure
 
