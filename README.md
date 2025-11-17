@@ -8,9 +8,9 @@ This is a multi-strategy ensemble trading bot designed to exploit several ineffi
 
 1. **Darknet Market Sentiment** - Primary signal source. Monitors cryptocurrency adoption trends across darknet marketplaces via Tor. Rising XMR acceptance rates and transaction volume on DNMs indicates increasing privacy demand before it reflects in spot price.
 
-2. **BTC-XMR Correlation Lag** - Secondary signal. XMR typically lags BTC price movements by 6-24 hours due to lower liquidity and fragmented exchange availability. When BTC moves >3%, XMR follows predictably.
+2. **BTC-XMR Correlation Lag** - Secondary signal. Hypothesis: XMR may lag BTC price movements due to lower liquidity and fragmented exchange availability. The strategy tests for correlation with various lag periods to identify if a predictable relationship exists.
 
-3. **News Sentiment Analysis** - LLM-based classification of crypto news from Twitter, focusing on privacy/regulation narratives that affect XMR price.
+3. **News Sentiment Analysis** - LLM-based classification of crypto news from Twitter and GitHub activity, focusing on privacy/regulation narratives that affect XMR price.
 
 4. **Traditional Technical Analysis** - Trend following (EMA), mean reversion (RSI/BB), and XGBoost-based market regime detection.
 
@@ -32,7 +32,7 @@ src/
 │   │
 │   ├── news/
 │   │   ├── strategy.py            # News sentiment strategy
-│   │   ├── news_aggregator.py     # Twitter API v2 client
+│   │   ├── news_aggregator.py     # Twitter & GitHub API client
 │   │   └── news_classifier.py     # OpenAI/Anthropic LLM classifier
 │   │
 │   ├── core/
@@ -72,8 +72,8 @@ The bot runs on a configurable interval (default: every 2 hours):
 2. Calculate technical indicators (50+ features via `pandas_ta`)
 3. Run all enabled strategies in parallel:
    - Darknet strategy checks marketplace scrape data from last 24h
-   - BTC correlation checks BTC price changes in last 6-24h window
-   - News strategy aggregates LLM-classified tweets from last 4h
+   - BTC correlation checks BTC price changes across multiple time windows and tests for lag correlation
+   - News strategy aggregates LLM-classified tweets and GitHub activity from last 4h
    - ML models predict market regime and filter signals
    - Technical strategies evaluate current price vs EMAs/RSI/BB
 4. Aggregate signals via weighted voting (configurable weights)
@@ -142,7 +142,7 @@ Signals are aggregated via weighted sum. Trade execution requires aggregate sign
 - Basic understanding of Tor network operation
 
 ### Optional (News Monitoring)
-- Twitter API v2 access ($100/month for Basic tier)
+- Twitter API v2 access ($100/month for Basic tier) OR GitHub API access (free with rate limits)
 - OpenAI API key ($10-20/month) OR Anthropic API key
 
 ### Optional (ML Models)
@@ -196,7 +196,7 @@ TELEGRAM_CHAT_ID=xxx
 
 # Strategy Enablement
 DARKNET_MONITORING_ENABLED=true   # Enable darknet sentiment
-NEWS_MONITORING_ENABLED=false     # Requires Twitter API ($$$)
+NEWS_MONITORING_ENABLED=false     # Requires Twitter/GitHub API
 ML_ENABLED=true                   # Enable XGBoost models
 
 # Darknet Configuration
@@ -283,14 +283,8 @@ ruff format src/
    - High memory usage during training (16GB+ recommended)
 
 3. **News Strategy**:
-   - Requires paid Twitter API ($100/month minimum)
+   - Supports Twitter API ($100/month) and/or GitHub API (free with rate limits)
    - LLM API costs vary with usage ($10-50/month typical)
-
-4. **General**:
-   - No live testing yet - all strategies are theoretical
-   - Backtest uses limited historical data
-   - Risk management not validated in production
-   - No automated capital allocation between strategies
 
 ## Documentation
 

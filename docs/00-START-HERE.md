@@ -83,7 +83,7 @@ Start with: `../README.md` (one level up)
 - **News Monitoring**: $110-140/month
   - Twitter API: $100/month
   - OpenAI/Anthropic: $10-20/month
-  
+
 - **Darknet Monitoring**: FREE but unreliable
   - Requires Tor
   - Manual .onion address maintenance
@@ -93,7 +93,7 @@ Start with: `../README.md` (one level up)
 
 **BTC-XMR Correlation Lag (40% weight)**
 
-The hypothesis: Monero follows Bitcoin price movements with a 6-24 hour delay due to lower liquidity.
+The hypothesis: Monero may follow Bitcoin price movements with a time delay due to lower liquidity. The strategy tests for this correlation dynamically rather than assuming a fixed lag period.
 
 **Status**: ⚠️ **UNPROVEN** - Requires validation through paper trading
 
@@ -267,4 +267,3 @@ Good signs during paper trading:
 ---
 
 **Remember**: This is experimental. Start with paper trading. Never risk more than you can afford to lose.
-

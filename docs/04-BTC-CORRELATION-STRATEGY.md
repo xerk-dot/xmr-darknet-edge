@@ -2,7 +2,9 @@
 
 ## Overview
 
-Successfully implemented the BTC-XMR correlation lag strategy as the **primary alpha generation source** for the Monero trading bot. This strategy exploits the observed 6-24 hour lag between Bitcoin and Monero price movements.
+Implemented the BTC-XMR correlation lag strategy as a **potential alpha generation source** for the Monero trading bot. This strategy tests for correlation between Bitcoin and Monero price movements with dynamic lag detection.
+
+**⚠️ IMPORTANT**: This strategy has NOT been validated with real historical data. The existence of a consistent, exploitable lag is an unproven hypothesis that requires backtesting before live trading.
 
 ## Implementation Date
 November 11, 2025
@@ -39,11 +41,13 @@ November 11, 2025
 ## Strategy Details
 
 ### Core Concept
-**Thesis**: Monero lags Bitcoin movements by 6-24 hours due to:
+**Hypothesis (UNPROVEN)**: Monero may lag Bitcoin movements due to:
 - Lower liquidity ($50-150M vs BTC's $20-40B daily volume)
 - Retail-heavy market (slower information propagation)
 - Fragmented exchange availability
-- High correlation with BTC but delayed price discovery
+- High correlation with BTC but potentially delayed price discovery
+
+**Reality Check**: This hypothesis has NOT been validated with real data. The lag period (if it exists at all) may vary significantly or be non-existent. The strategy dynamically tests for correlation across 0-24 hour lag periods rather than assuming a fixed lag.
 
 ### Key Features
 
@@ -55,9 +59,10 @@ November 11, 2025
 
 #### 2. Correlation Analysis
 - Real-time correlation calculation
-- Automatic lag detection (0-24 hours)
+- Automatic lag detection (tests 0-24 hour lag periods)
 - Minimum correlation threshold (0.6)
 - Uses 14-day rolling window
+- **Note**: Optimal lag varies and may not be consistent
 
 #### 3. Signal Generation
 - Generates BUY/SELL signals based on BTC direction
@@ -102,7 +107,7 @@ The bot now uses a weighted ensemble:
 }
 ```
 
-**Rationale**: 
+**Rationale**:
 - BTC correlation is the highest-conviction edge
 - ML acts as confirmation/filter, not primary signal
 - Traditional strategies provide diversification
@@ -131,9 +136,11 @@ python test_btc_correlation.py
    - Simulated returns
 
 ### Expected Performance
-- **Directional Accuracy**: 60-75% (based on historical analysis)
-- **Optimal Lag Window**: 8-16 hours
-- **Correlation**: Typically 0.6-0.8
+⚠️ **NO REAL PERFORMANCE DATA EXISTS**
+- Strategy has never been backtested with real historical data
+- Performance metrics are purely speculative
+- Lag periods are dynamic and may vary widely
+- Correlation strength and consistency are unknown
 
 ## Integration with Existing System
 
@@ -226,15 +233,21 @@ Based on the initial discussion, the next logical enhancement is:
 
 ## Conclusion
 
-The BTC-XMR correlation strategy is now **production-ready** and integrated as the primary signal source. The implementation:
+The BTC-XMR correlation strategy is **implemented but UNVALIDATED**. Current status:
 
-1. ✅ Exploits a genuine market inefficiency (lag)
-2. ✅ Has measurable performance metrics
-3. ✅ Includes comprehensive testing
-4. ✅ Integrates cleanly with existing system
-5. ✅ Maintains code quality standards
+1. ✅ Code is well-structured and integrates cleanly
+2. ✅ Maintains code quality standards
+3. ❌ Has NO real performance metrics or backtest results
+4. ❌ The lag hypothesis is UNPROVEN and may not exist
+5. ❌ No evidence of genuine market inefficiency
 
-**Recommendation**: Run `test_btc_correlation.py` with live data to validate current correlation and tune parameters before live trading.
+**CRITICAL**: This strategy must NOT be used for live trading until:
+1. Backtested with real historical BTC/XMR data
+2. Correlation and lag consistency validated over multiple market regimes
+3. Win rate and edge verified with statistical significance
+4. Paper traded successfully for 1+ month
+
+**The "6-24 hour lag" claim was speculative and should not be relied upon.**
 
 ---
 
@@ -256,4 +269,3 @@ python main.py  # Will log correlation stats every cycle
 - Base strategy interface: `src/signals/base_strategy.py`
 - Signal aggregation: `src/signals/signal_aggregator.py`
 - Main bot loop: `main.py` (Lines 84-147)
-
